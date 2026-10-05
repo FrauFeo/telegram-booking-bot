@@ -1,0 +1,15 @@
+{
+  "business_name": {"uk": "Barber Lab", "en": "Barber Lab"},
+  "currency": {"uk": "грн", "en": "UAH"},
+  "timezone": "Europe/Kyiv",
+  "work_days": [0, 1, 2, 3, 4, 5],
+  "work_hours": ["10:00", "19:00"],
+  "slot_step_min": 30,
+  "min_lead_min": 60,
+  "days_ahead": 7,
+  "services": [
+    {"id": "haircut", "name": {"uk": "Чоловіча стрижка", "en": "Men's haircut"}, "duration": 60, "price": 500},
+    {"id": "beard", "name": {"uk": "Оформлення бороди", "en": "Beard trim"}, "duration": 30, "price": 300},
+    {"id": "combo", "name": {"uk": "Стрижка + борода", "en": "Haircut + beard"}, "duration": 90, "price": 700}
+  ]
+}
