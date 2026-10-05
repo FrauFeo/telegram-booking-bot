@@ -8,7 +8,7 @@ from datetime import datetime, time, timedelta
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, EditMessageReplyMarkup, EditMessageText, SendMessage
+from aiogram.methods import DeleteMessage, EditMessageReplyMarkup, EditMessageText, SendMessage, SendPhoto
 from aiogram.types import CallbackQuery, Chat, Contact, Message, Update, User
 from zoneinfo import ZoneInfo
 
@@ -29,7 +29,7 @@ class FakeSession(BaseSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
-        if isinstance(method, (SendMessage, EditMessageText, EditMessageReplyMarkup)):
+        if isinstance(method, (SendMessage, SendPhoto, EditMessageText, EditMessageReplyMarkup)):
             chat_id = getattr(method, "chat_id", None) or CLIENT
             return Message(message_id=len(self.calls), date=datetime.now(),
                            chat=Chat(id=chat_id, type="private"), text=getattr(method, "text", "") or "")
@@ -102,12 +102,16 @@ def buttons(method):
     return [b for row in method.reply_markup.inline_keyboard for b in row]
 
 
+def clickable(method):
+    return [b for b in buttons(method) if b.callback_data]
+
+
 async def book_first_slot(dp, bot, session):
     await send_text(dp, bot, CLIENT, "/start")
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)        # service
     await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)  # first day
-    slot = buttons(session.sent(EditMessageText)[-1])[0]
+    slot = clickable(session.sent(EditMessageText)[-1])[0]
     await press(dp, bot, CLIENT, slot.callback_data)                                   # first time
     await send_text(dp, bot, CLIENT, "+380 67 123 45 67")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)        # confirm
@@ -121,11 +125,13 @@ async def test_full_booking_flow(env):
     assert slot.text == "10:00"          # Monday 09:00 + 1h lead -> first slot is 10:00 today
     b = db.get(1)
     assert b.start == datetime(2026, 10, 5, 10, 0) and b.phone == "+380 67 123 45 67"
-    assert any("Готово" in m.text for m in session.sent(chat_id=CLIENT))
+    assert any("Ви записані" in m.text for m in session.sent(chat_id=CLIENT))
     owner_msgs = session.sent(chat_id=OWNER)
     assert owner_msgs and "Новий запис #1" in owner_msgs[-1].text
     # demo mode: the client also gets the owner's view
-    assert any(m.text.startswith("👀") for m in session.sent(chat_id=CLIENT))
+    assert any(m.text.startswith("<i>Демо") for m in session.sent(chat_id=CLIENT))
+    # helper messages (the step-by-step message and the summary) are cleaned up
+    assert len([c for c in session.calls if isinstance(c, DeleteMessage)]) >= 3
 
 
 async def test_booked_slot_disappears(env):
@@ -134,8 +140,11 @@ async def test_booked_slot_disappears(env):
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
-    times = [b.text for b in buttons(session.sent(EditMessageText)[-1])]
-    assert "10:00" not in times and "10:30" not in times and "11:00" in times
+    grid = {b.text: b for b in buttons(session.sent(EditMessageText)[-1])}
+    assert grid["10:00"].disabled is not None and grid["10:30"].disabled is not None   # shown, but greyed out
+    assert grid["11:00"].callback_data and grid["11:00"].disabled is None
+    # Telegram accepts exactly one action per button: a disabled one must not carry callback data
+    assert all(not (b.disabled and b.callback_data) for b in grid.values())
 
 
 async def test_owner_confirms_and_client_is_told(env):
@@ -160,7 +169,7 @@ async def test_bad_phone_is_rejected(env):
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
-    await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
+    await press(dp, bot, CLIENT, clickable(session.sent(EditMessageText)[-1])[0].callback_data)
     await send_text(dp, bot, CLIENT, "hello")
     assert "Не схоже" in session.sent(chat_id=CLIENT)[-1].text
     await send_text(dp, bot, CLIENT, contact=Contact(phone_number="380671234567", first_name="Ivan"))
@@ -183,5 +192,23 @@ async def test_reminder_sent_once(env, monkeypatch):
     monkeypatch.setattr(Settings, "now", lambda self: datetime(2026, 10, 5, 12, 5))
     await send_due(bot, db, s)
     await send_due(bot, db, s)
-    reminders = [m for m in session.sent(chat_id=CLIENT) if m.text.startswith("⏰")]
-    assert len(reminders) == 1 and "завтра о 12:00" in reminders[0].text
+    reminders = [m for m in session.sent(chat_id=CLIENT) if "Нагадування" in m.text]
+    assert len(reminders) == 1 and "Завтра о 12:00" in reminders[0].text
+
+
+async def test_profile_setup_fits_limits_and_uploads_avatar_once(env, monkeypatch, tmp_path):
+    from aiogram.methods import SetMyDescription, SetMyProfilePhoto, SetMyShortDescription
+    import bot.__main__ as main
+    dp, bot, session, db, s = env
+    avatar = tmp_path / "avatar.jpg"
+    avatar.write_bytes(b"jpg")
+    monkeypatch.setattr(main, "AVATAR", avatar)
+
+    await main.setup_profile(bot, s)
+    await main.setup_profile(bot, s)   # a restart must not re-upload the same avatar
+
+    descs = [c for c in session.calls if isinstance(c, SetMyDescription)]
+    shorts = [c for c in session.calls if isinstance(c, SetMyShortDescription)]
+    assert descs and all(len(c.description) <= 512 for c in descs)
+    assert shorts and all(len(c.short_description) <= 120 for c in shorts)
+    assert len([c for c in session.calls if isinstance(c, SetMyProfilePhoto)]) == 1

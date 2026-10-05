@@ -38,6 +38,25 @@ def free_slots(day: date, duration: timedelta, busy: list[tuple[datetime, timede
     return result
 
 
+def day_grid(day: date, duration: timedelta, busy: list[tuple[datetime, timedelta]],
+             sch: Schedule, now: datetime) -> list[tuple[datetime, bool]]:
+    """Every start time of the working day with a flag "free".
+
+    The keyboard shows the whole day and greys out taken or past times,
+    so the client sees a real schedule rather than a few random buttons.
+    """
+    if day.weekday() not in sch.work_days:
+        return []
+    free = set(free_slots(day, duration, busy, sch, now))
+    slot = datetime.combine(day, sch.open_at)
+    close = datetime.combine(day, sch.close_at)
+    grid = []
+    while slot + duration <= close:
+        grid.append((slot, slot in free))
+        slot += sch.step
+    return grid
+
+
 def bookable_days(duration: timedelta, busy: list[tuple[datetime, timedelta]],
                   sch: Schedule, now: datetime) -> list[date]:
     """Days in the booking window that still have at least one free slot."""

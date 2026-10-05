@@ -40,6 +40,18 @@ def test_min_lead_hides_too_soon_slots():
     assert slots[0] == datetime(2026, 10, 5, 14, 30)
 
 
+def test_day_grid_marks_busy_and_past_times():
+    from bot.slots import day_grid
+    now = datetime(2026, 10, 5, 11, 10)
+    busy = [(datetime(2026, 10, 5, 14, 0), H)]
+    grid = dict(day_grid(MON, H, busy, SCH, now))
+    assert len(grid) == 17                                  # whole day is shown
+    assert grid[datetime(2026, 10, 5, 10, 0)] is False      # already past
+    assert grid[datetime(2026, 10, 5, 12, 30)] is True
+    assert grid[datetime(2026, 10, 5, 13, 30)] is False     # would overlap 14:00
+    assert grid[datetime(2026, 10, 5, 15, 0)] is True
+
+
 def test_bookable_days_skips_full_and_past_days():
     now = datetime(2026, 10, 5, 18, 30)   # Monday evening: no time left today
     days = bookable_days(H, [], SCH, now)

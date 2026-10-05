@@ -1,24 +1,32 @@
-"""Bot handlers: the client's booking flow, the owner's buttons and commands."""
+"""Bot handlers: the client's booking flow, the owner's buttons and commands.
+
+The booking runs in one message that is edited step by step. Helper messages
+(the phone request, the summary to check) are deleted once the booking is done,
+so the chat ends with one clean card instead of a pile of prompts.
+"""
 import html
 import re
 from datetime import datetime, timedelta
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message, User
+from aiogram.types import CallbackQuery, FSInputFile, Message, User
 
-from .config import Settings
+from .config import ROOT, Service, Settings
 from .db import DB, Booking
 from .keyboards import (AdminCb, BackCb, ConfirmCb, DayCb, MyCancelCb, ServiceCb, SlotCb,
                         admin_kb, confirm_kb, contact_kb, days_kb, main_kb, my_kb,
                         services_kb, slots_kb)
-from .slots import bookable_days, free_slots, overlaps
-from .texts import all_variants, fmt_day, fmt_when, status_text, t
+from .slots import bookable_days, day_grid, overlaps
+from .texts import all_variants, fmt_day, fmt_when, status_text, step, t
 
 router = Router()
 PHONE_RE = re.compile(r"^\+?[\d\s()\-]{7,20}$")
+BANNER = ROOT / "assets" / "banner.jpg"
+_banner_file_id: dict[str, str] = {}   # Telegram file_id after the first upload, so the photo is sent once
 
 
 class BookingForm(StatesGroup):
@@ -37,20 +45,49 @@ def busy_window(db: DB, s: Settings, now: datetime):
     return db.busy(now - timedelta(days=1), now + timedelta(days=s.schedule.days_ahead + 1))
 
 
+def minutes(svc: Service) -> int:
+    return int(svc.duration.total_seconds() // 60)
+
+
+def card(lang: str, s: Settings, svc: Service, start: datetime, name: str, phone: str) -> str:
+    return t(lang, "card", service=svc.name(lang), when=fmt_when(lang, start), dur=minutes(svc),
+             price=svc.price, cur=s.currency[lang], name=html.escape(name), phone=html.escape(phone))
+
+
 def booking_text(lang: str, key: str, b: Booking, s: Settings) -> str:
-    return t(lang, key, id=b.id, service=s.services[b.service_id].name(lang),
-             when=fmt_when(lang, b.start), name=html.escape(b.name), phone=html.escape(b.phone),
-             status=status_text(lang, b.status))
+    svc = s.services[b.service_id]
+    return t(lang, key, id=b.id, service=svc.name(lang), when=fmt_when(lang, b.start),
+             name=html.escape(b.name), phone=html.escape(b.phone), status=status_text(lang, b.status),
+             card=card(lang, s, svc, b.start, b.name, b.phone))
 
 
-# --- start, language, fallback for the main menu ---------------------------
+async def drop(bot: Bot, chat_id: int, *message_ids: int | None) -> None:
+    """Delete helper messages; ones that are already gone or too old are skipped."""
+    for mid in message_ids:
+        if mid:
+            try:
+                await bot.delete_message(chat_id, mid)
+            except TelegramBadRequest:
+                pass
+
+
+# --- start, language --------------------------------------------------------
 
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext, db: DB, settings: Settings):
     await state.clear()
     lang = user_lang(db, message.from_user)
     db.set_lang(message.from_user.id, lang)
-    await message.answer(t(lang, "start", business=settings.business[lang]), reply_markup=main_kb(lang))
+    text = t(lang, "start", business=settings.business[lang])
+    if settings.demo_mode:
+        text += t(lang, "start_demo")
+    if not BANNER.exists():
+        await message.answer(text, reply_markup=main_kb(lang))
+        return
+    sent = await message.answer_photo(_banner_file_id.get("id") or FSInputFile(BANNER),
+                                      caption=text, reply_markup=main_kb(lang))
+    if getattr(sent, "photo", None):
+        _banner_file_id["id"] = sent.photo[-1].file_id
 
 
 @router.message(F.text.in_(all_variants("btn_lang")))
@@ -60,13 +97,17 @@ async def switch_lang(message: Message, db: DB):
     await message.answer(t(lang, "lang_set"), reply_markup=main_kb(lang))
 
 
-# --- booking: service -> day -> time --------------------------------------
+# --- booking: service -> day -> time (one message, edited) -----------------
+
+def services_text(lang: str) -> str:
+    return step(lang, 1, "title_service") + "\n" + t(lang, "choose_service")
+
 
 @router.message(F.text.in_(all_variants("btn_book")))
 async def book(message: Message, state: FSMContext, db: DB, settings: Settings):
     await state.clear()
     lang = user_lang(db, message.from_user)
-    await message.answer(t(lang, "choose_service"), reply_markup=services_kb(lang, settings))
+    await message.answer(services_text(lang), reply_markup=services_kb(lang, settings))
 
 
 async def show_days(call: CallbackQuery, sid: str, db: DB, s: Settings):
@@ -77,8 +118,19 @@ async def show_days(call: CallbackQuery, sid: str, db: DB, s: Settings):
     if not days:
         await call.message.edit_text(t(lang, "no_days"), reply_markup=services_kb(lang, s))
         return
-    await call.message.edit_text(t(lang, "choose_day", service=svc.name(lang)),
-                                 reply_markup=days_kb(lang, sid, days))
+    await call.message.edit_text(step(lang, 2, "title_day") + "\n" + t(lang, "choose_day", service=svc.name(lang)),
+                                 reply_markup=days_kb(lang, sid, days, now.date()))
+
+
+async def show_times(call: CallbackQuery, svc: Service, day, db: DB, s: Settings) -> bool:
+    lang = user_lang(db, call.from_user)
+    now = s.now()
+    grid = day_grid(day, svc.duration, busy_window(db, s, now), s.schedule, now)
+    if not any(free for _, free in grid):
+        return False
+    text = step(lang, 3, "title_time") + "\n" + t(lang, "choose_time", service=svc.name(lang), day=fmt_day(lang, day))
+    await call.message.edit_text(text, reply_markup=slots_kb(lang, svc.id, grid))
+    return True
 
 
 @router.callback_query(ServiceCb.filter())
@@ -93,14 +145,10 @@ async def pick_day(call: CallbackQuery, callback_data: DayCb, db: DB, settings: 
     lang = user_lang(db, call.from_user)
     svc = settings.services[callback_data.sid]
     day = datetime.strptime(callback_data.d, "%Y%m%d").date()
-    now = settings.now()
-    slots = free_slots(day, svc.duration, busy_window(db, settings, now), settings.schedule, now)
-    if not slots:
+    if not await show_times(call, svc, day, db, settings):
         await call.answer(t(lang, "slot_taken"), show_alert=True)
         await show_days(call, svc.id, db, settings)
         return
-    await call.message.edit_text(t(lang, "choose_time", service=svc.name(lang), day=fmt_day(lang, day)),
-                                 reply_markup=slots_kb(lang, svc.id, slots))
     await call.answer()
 
 
@@ -110,7 +158,7 @@ async def go_back(call: CallbackQuery, callback_data: BackCb, db: DB, settings: 
     if callback_data.to == "days" and callback_data.sid in settings.services:
         await show_days(call, callback_data.sid, db, settings)
     else:
-        await call.message.edit_text(t(lang, "choose_service"), reply_markup=services_kb(lang, settings))
+        await call.message.edit_text(services_text(lang), reply_markup=services_kb(lang, settings))
     await call.answer()
 
 
@@ -118,12 +166,19 @@ async def go_back(call: CallbackQuery, callback_data: BackCb, db: DB, settings: 
 async def pick_slot(call: CallbackQuery, callback_data: SlotCb, state: FSMContext,
                     db: DB, settings: Settings):
     lang = user_lang(db, call.from_user)
-    await state.set_state(BookingForm.contact)
-    await state.update_data(sid=callback_data.sid, ts=callback_data.ts)
     svc = settings.services[callback_data.sid]
     start = datetime.strptime(callback_data.ts, "%Y%m%d%H%M")
-    await call.message.edit_text(f"<b>{svc.name(lang)}</b>, {fmt_when(lang, start)}")
-    await call.message.answer(t(lang, "ask_contact"), reply_markup=contact_kb(lang))
+    now = settings.now()
+    if start < now + settings.schedule.min_lead or overlaps(start, svc.duration, busy_window(db, settings, now)):
+        await call.answer(t(lang, "slot_taken"), show_alert=True)
+        await show_times(call, svc, start.date(), db, settings)
+        return
+    await call.message.edit_text(t(lang, "picked", service=svc.name(lang), when=fmt_when(lang, start)))
+    ask = await call.message.answer(step(lang, 4, "title_contact") + "\n" + t(lang, "ask_contact"),
+                                    reply_markup=contact_kb(lang))
+    await state.set_state(BookingForm.contact)
+    await state.update_data(sid=svc.id, ts=callback_data.ts, flow_id=call.message.message_id,
+                            ask_id=ask.message_id)
     await call.answer()
 
 
@@ -131,14 +186,16 @@ async def pick_slot(call: CallbackQuery, callback_data: SlotCb, state: FSMContex
 
 @router.message(BookingForm.contact, F.text.in_(all_variants("btn_cancel")))
 @router.message(BookingForm.confirm, F.text.in_(all_variants("btn_cancel")))
-async def cancel_flow(message: Message, state: FSMContext, db: DB):
+async def cancel_flow(message: Message, state: FSMContext, bot: Bot, db: DB):
+    data = await state.get_data()
     await state.clear()
     lang = user_lang(db, message.from_user)
+    await drop(bot, message.chat.id, data.get("flow_id"), data.get("ask_id"), data.get("confirm_id"))
     await message.answer(t(lang, "flow_cancelled"), reply_markup=main_kb(lang))
 
 
 @router.message(BookingForm.contact)
-async def got_contact(message: Message, state: FSMContext, db: DB, settings: Settings):
+async def got_contact(message: Message, state: FSMContext, bot: Bot, db: DB, settings: Settings):
     lang = user_lang(db, message.from_user)
     if message.contact:
         phone = message.contact.phone_number
@@ -148,14 +205,14 @@ async def got_contact(message: Message, state: FSMContext, db: DB, settings: Set
     else:
         await message.answer(t(lang, "bad_phone"))
         return
-    data = await state.update_data(phone=phone, name=name)
-    await state.set_state(BookingForm.confirm)
+    data = await state.get_data()
+    await drop(bot, message.chat.id, data.get("ask_id"))
     svc = settings.services[data["sid"]]
     start = datetime.strptime(data["ts"], "%Y%m%d%H%M")
-    await message.answer(
-        t(lang, "confirm", service=svc.name(lang), when=fmt_when(lang, start), price=svc.price,
-          cur=settings.currency[lang], name=html.escape(name), phone=html.escape(phone)),
-        reply_markup=confirm_kb(lang))
+    sent = await message.answer(t(lang, "confirm", card=card(lang, settings, svc, start, name, phone)),
+                                reply_markup=confirm_kb(lang))
+    await state.update_data(phone=phone, name=name, ask_id=None, confirm_id=sent.message_id)
+    await state.set_state(BookingForm.confirm)
 
 
 @router.callback_query(BookingForm.confirm, ConfirmCb.filter())
@@ -163,9 +220,10 @@ async def confirm(call: CallbackQuery, callback_data: ConfirmCb, state: FSMConte
                   bot: Bot, db: DB, settings: Settings):
     lang = user_lang(db, call.from_user)
     data = await state.get_data()
-    await call.message.edit_reply_markup(reply_markup=None)
+    await state.clear()
+    chat_id = call.message.chat.id
+    await drop(bot, chat_id, data.get("flow_id"), data.get("confirm_id"))
     if not callback_data.ok:
-        await state.clear()
         await call.message.answer(t(lang, "flow_cancelled"), reply_markup=main_kb(lang))
         await call.answer()
         return
@@ -175,17 +233,15 @@ async def confirm(call: CallbackQuery, callback_data: ConfirmCb, state: FSMConte
     now = settings.now()
     # Someone else may have taken the slot while this client was typing the phone.
     if start < now + settings.schedule.min_lead or overlaps(start, svc.duration, busy_window(db, settings, now)):
-        await state.clear()
         await call.message.answer(t(lang, "slot_taken"), reply_markup=main_kb(lang))
-        await call.message.answer(t(lang, "choose_service"), reply_markup=services_kb(lang, settings))
+        await call.message.answer(services_text(lang), reply_markup=services_kb(lang, settings))
         await call.answer()
         return
 
     bid = db.add(call.from_user.id, data["name"], data["phone"], svc.id, start, svc.duration, now)
-    await state.clear()
-    await call.message.answer(t(lang, "booked", service=svc.name(lang), when=fmt_when(lang, start)),
-                              reply_markup=main_kb(lang))
-    await notify_owner(bot, db, settings, db.get(bid), "admin_new", with_buttons=True)
+    b = db.get(bid)
+    await call.message.answer(booking_text(lang, "booked", b, settings), reply_markup=main_kb(lang))
+    await notify_owner(bot, db, settings, b, "admin_new", with_buttons=True)
     await call.answer()
 
 
@@ -232,7 +288,7 @@ async def admin_action(call: CallbackQuery, callback_data: AdminCb, bot: Bot, db
 def bookings_list(lang: str, title: str, items: list[Booking], s: Settings) -> str:
     if not items:
         return t(lang, "list_empty")
-    return title + "\n\n" + "\n".join(booking_text(lang, "list_item", b, s) for b in items)
+    return title + "\n\n" + "\n\n".join(booking_text(lang, "list_item", b, s) for b in items)
 
 
 async def owner_list(message: Message, db: DB, s: Settings, days: int, title_key: str):
@@ -271,7 +327,7 @@ async def my_bookings(message: Message, db: DB, settings: Settings):
     lines = [t(lang, "my_item", n=n, when=fmt_when(lang, b.start),
                service=settings.services[b.service_id].name(lang), status=status_text(lang, b.status))
              for n, b in enumerate(items, 1)]
-    await message.answer(t(lang, "my_title") + "\n\n" + "\n".join(lines), reply_markup=my_kb(lang, items))
+    await message.answer(t(lang, "my_title") + "\n\n" + "\n\n".join(lines), reply_markup=my_kb(lang, items))
 
 
 @router.callback_query(MyCancelCb.filter())
