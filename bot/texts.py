@@ -28,9 +28,9 @@ TEXTS = {
         "title_contact": "Контакт",
         "choose_service": "Оберіть, що вам потрібно:",
         "service_line": "{name} · {dur} хв · {price} {cur}",
-        "choose_day": "{service}\nОберіть день. Сірим позначено вихідні та зайняті дні.",
+        "choose_day": "{service}\nОберіть день:",
         "no_days": "На найближчі дні вільних місць немає. Спробуйте пізніше.",
-        "choose_time": "{service}, {day}\nСірим позначено зайнятий час.",
+        "choose_time": "{service}, {day}\nОберіть вільний час:",
         "back": "Назад",
         "picked": "<b>{service}</b>\n{when}",
         "ask_contact": "Залиште номер телефону, щоб з вами могли зв'язатися. "
@@ -72,6 +72,9 @@ TEXTS = {
         "not_admin": "Ця команда для власника бізнесу.",
         "unknown": "Скористайтеся кнопками внизу.",
         "today": "Сьогодні",
+        "slot_busy": "зайнято",
+        "day_off": "вихідний",
+        "day_full": "зайнято",
         "tomorrow": "Завтра",
         "at": "о",
         "weekdays": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"],
@@ -97,9 +100,9 @@ TEXTS = {
         "title_contact": "Contact",
         "choose_service": "Choose what you need:",
         "service_line": "{name} · {dur} min · {price} {cur}",
-        "choose_day": "{service}\nChoose a day. Days off and fully booked days are greyed out.",
+        "choose_day": "{service}\nChoose a day:",
         "no_days": "No free slots in the next days. Please try again later.",
-        "choose_time": "{service}, {day}\nTaken times are greyed out.",
+        "choose_time": "{service}, {day}\nChoose a free time:",
         "back": "Back",
         "picked": "<b>{service}</b>\n{when}",
         "ask_contact": "Leave your phone number so we can reach you. Tap the button below or type the number.",
@@ -140,6 +143,9 @@ TEXTS = {
         "not_admin": "This command is for the business owner.",
         "unknown": "Please use the buttons below.",
         "today": "Today",
+        "slot_busy": "taken",
+        "day_off": "day off",
+        "day_full": "full",
         "tomorrow": "Tomorrow",
         "at": "at",
         "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
@@ -167,6 +173,15 @@ def day_label(lang: str, d: date, today: date) -> str:
     if (d - today).days == 1:
         return t(lang, "tomorrow")
     return fmt_day(lang, d)
+
+
+def short_day(lang: str, d: date, today: date) -> str:
+    """Short day name for a disabled button: "Today", "Tomorrow" or a weekday."""
+    if d == today:
+        return t(lang, "today")
+    if (d - today).days == 1:
+        return t(lang, "tomorrow")
+    return TEXTS[lang]["weekdays"][d.weekday()]
 
 
 def fmt_when(lang: str, dt: datetime) -> str:

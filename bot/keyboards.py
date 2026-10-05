@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .config import Settings
 from .db import Booking
-from .texts import day_label, t
+from .texts import day_label, short_day, t
 
 
 class ServiceCb(CallbackData, prefix="svc"):
@@ -42,15 +42,6 @@ class MyCancelCb(CallbackData, prefix="myc"):
     bid: int
 
 
-def strike(text: str) -> str:
-    """Strikethrough with a combining character (U+0336).
-
-    Disabled buttons are greyed out only in up-to-date Telegram apps; older ones
-    draw them like normal buttons. Crossing the label out shows "taken" everywhere.
-    """
-    return "".join(ch + chr(0x0336) for ch in text)
-
-
 # Button colours (Bot API 9.4+): "primary" blue, "success" green, "danger" red.
 # They carry the meaning that emoji used to, without cluttering the text.
 
@@ -79,27 +70,32 @@ def services_kb(lang: str, s: Settings):
     return kb.as_markup()
 
 
-def days_kb(lang: str, sid: str, week: list[tuple[date, bool]], today: date):
-    """The whole booking window: days off and fully booked days are greyed out."""
+# Taken days and times are disabled buttons AND say so in words: older Telegram apps
+# do not grey out disabled buttons, and combining strikethrough renders as an underline
+# in some fonts (Telegram Desktop), so plain words are the only reliable signal.
+
+def days_kb(lang: str, sid: str, week: list[tuple[date, str]], today: date):
+    """The whole booking window: days off and fully booked days are shown but disabled."""
     kb = InlineKeyboardBuilder()
-    for d, free in week:
-        if free:
+    for d, status in week:
+        if status == "free":
             kb.button(text=day_label(lang, d, today), callback_data=DayCb(sid=sid, d=f"{d:%Y%m%d}"))
         else:
-            kb.button(text=strike(day_label(lang, d, today)), disabled=DisabledButton())
+            word = t(lang, "day_off" if status == "off" else "day_full")
+            kb.button(text=f"{short_day(lang, d, today)} · {word}", disabled=DisabledButton())
     kb.button(text=t(lang, "back"), callback_data=BackCb(to="services"))
     kb.adjust(*([3] * ((len(week) + 2) // 3)), 1)
     return kb.as_markup()
 
 
 def slots_kb(lang: str, sid: str, grid: list[tuple[datetime, bool]]):
-    """The whole working day: free times are buttons, taken ones are greyed out and do nothing."""
+    """The whole working day: free times are buttons, taken ones say "taken" and do nothing."""
     kb = InlineKeyboardBuilder()
     for start, free in grid:
         if free:
             kb.button(text=f"{start:%H:%M}", callback_data=SlotCb(sid=sid, ts=f"{start:%Y%m%d%H%M}"))
         else:
-            kb.button(text=strike(f"{start:%H:%M}"), disabled=DisabledButton())
+            kb.button(text=t(lang, "slot_busy"), disabled=DisabledButton())
     kb.button(text=t(lang, "back"), callback_data=BackCb(to="days", sid=sid))
     kb.adjust(*([4] * ((len(grid) + 3) // 4)), 1)
     return kb.as_markup()

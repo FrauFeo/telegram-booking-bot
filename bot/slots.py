@@ -58,14 +58,19 @@ def day_grid(day: date, duration: timedelta, busy: list[tuple[datetime, timedelt
 
 
 def week_grid(duration: timedelta, busy: list[tuple[datetime, timedelta]],
-              sch: Schedule, now: datetime) -> list[tuple[date, bool]]:
-    """Every day of the booking window with a flag "has free time".
+              sch: Schedule, now: datetime) -> list[tuple[date, str]]:
+    """Every day of the booking window with a status: "free", "off" (day off) or "full".
 
-    Days off and fully booked days stay in the list but are greyed out,
-    the same way taken times are, so the week reads like a calendar.
+    Days off and fully booked days stay in the list, so the week reads like a calendar.
     """
     days = (now.date() + timedelta(days=i) for i in range(sch.days_ahead + 1))
-    return [(d, bool(free_slots(d, duration, busy, sch, now))) for d in days]
+    result = []
+    for d in days:
+        if d.weekday() not in sch.work_days:
+            result.append((d, "off"))
+        else:
+            result.append((d, "free" if free_slots(d, duration, busy, sch, now) else "full"))
+    return result
 
 
 def bookable_days(duration: timedelta, busy: list[tuple[datetime, timedelta]],

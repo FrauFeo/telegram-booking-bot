@@ -115,7 +115,7 @@ async def show_days(call: CallbackQuery, sid: str, db: DB, s: Settings):
     svc = s.services[sid]
     now = s.now()
     week = week_grid(svc.duration, busy_window(db, s, now), s.schedule, now)
-    if not any(free for _, free in week):
+    if not any(status == "free" for _, status in week):
         await call.message.edit_text(t(lang, "no_days"), reply_markup=services_kb(lang, s))
         return
     await call.message.edit_text(step(lang, 2, "title_day") + "\n" + t(lang, "choose_day", service=svc.name(lang)),

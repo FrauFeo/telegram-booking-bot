@@ -19,7 +19,6 @@ from bot.reminders import send_due
 from bot.slots import Schedule
 
 CLIENT, OWNER = 111, 999
-STRIKE = chr(0x0336)   # combining strikethrough used for taken days and times
 NOW = datetime(2026, 10, 5, 9, 0)   # Monday morning
 
 
@@ -140,15 +139,13 @@ async def test_booked_slot_disappears(env):
     await book_first_slot(dp, bot, session)
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
-    await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
-    shown = buttons(session.sent(EditMessageText)[-1])
-    grid = {b.text.replace(STRIKE, ""): b for b in shown}
-    # taken times are crossed out too: older Telegram apps do not grey out disabled buttons
-    assert all(STRIKE in b.text for b in shown if b.disabled)
-    assert grid["10:00"].disabled is not None and grid["10:30"].disabled is not None   # shown, but greyed out
-    assert grid["11:00"].callback_data and grid["11:00"].disabled is None
+    await press(dp, bot, CLIENT, clickable(session.sent(EditMessageText)[-1])[0].callback_data)
+    shown = [b for b in buttons(session.sent(EditMessageText)[-1]) if b.text != "Назад"]
+    # 10:00 is booked for an hour, so 10:00 and 10:30 are taken: shown in place, in words, not clickable
+    assert [b.text for b in shown[:3]] == ["зайнято", "зайнято", "11:00"]
+    assert shown[0].disabled is not None and shown[2].callback_data and shown[2].disabled is None
     # Telegram accepts exactly one action per button: a disabled one must not carry callback data
-    assert all(not (b.disabled and b.callback_data) for b in grid.values())
+    assert all(not (b.disabled and b.callback_data) for b in shown)
 
 
 async def test_owner_confirms_and_client_is_told(env):
@@ -224,7 +221,7 @@ async def test_week_shows_days_off_greyed(env):
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     days = [b for b in buttons(session.sent(EditMessageText)[-1]) if b.text != "Назад"]
     assert len(days) == 8                                   # today + 7 days, nothing hidden
-    sunday = next(b for b in days if b.text.replace(STRIKE, "").startswith("Нд"))
-    assert STRIKE in sunday.text
+    sunday = next(b for b in days if b.text.startswith("Нд"))
+    assert sunday.text == "Нд · вихідний"
     assert sunday.disabled is not None and not sunday.callback_data
     assert days[0].text == "Сьогодні" and days[0].callback_data

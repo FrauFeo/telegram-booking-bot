@@ -96,3 +96,13 @@ def test_no_stale_24h_after_2h_was_sent():
 def test_no_reminders_after_start():
     r = state(START, datetime(2026, 10, 5, 12))
     assert due_reminders(r, datetime(2026, 10, 10, 15, 1)) == []
+
+
+def test_week_grid_statuses():
+    from bot.slots import week_grid
+    now = datetime(2026, 10, 5, 18, 30)            # Monday evening, nothing left today
+    week = dict(week_grid(H, [], SCH, now))
+    assert len(week) == 8
+    assert week[MON] == "full"
+    assert week[date(2026, 10, 6)] == "free"
+    assert week[date(2026, 10, 11)] == "off"        # Sunday
