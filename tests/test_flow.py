@@ -110,7 +110,7 @@ async def book_first_slot(dp, bot, session):
     await send_text(dp, bot, CLIENT, "/start")
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)        # service
-    await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)  # first day
+    await press(dp, bot, CLIENT, clickable(session.sent(EditMessageText)[-1])[0].callback_data)  # first day
     slot = clickable(session.sent(EditMessageText)[-1])[0]
     await press(dp, bot, CLIENT, slot.callback_data)                                   # first time
     await send_text(dp, bot, CLIENT, "+380 67 123 45 67")
@@ -212,3 +212,14 @@ async def test_profile_setup_fits_limits_and_uploads_avatar_once(env, monkeypatc
     assert descs and all(len(c.description) <= 512 for c in descs)
     assert shorts and all(len(c.short_description) <= 120 for c in shorts)
     assert len([c for c in session.calls if isinstance(c, SetMyProfilePhoto)]) == 1
+
+
+async def test_week_shows_days_off_greyed(env):
+    dp, bot, session, db, s = env
+    await send_text(dp, bot, CLIENT, "📅 Записатися")
+    await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
+    days = [b for b in buttons(session.sent(EditMessageText)[-1]) if b.text != "Назад"]
+    assert len(days) == 8                                   # today + 7 days, nothing hidden
+    sunday = next(b for b in days if b.text.startswith("Нд"))
+    assert sunday.disabled is not None and not sunday.callback_data
+    assert days[0].text == "Сьогодні" and days[0].callback_data

@@ -20,7 +20,7 @@ from .db import DB, Booking
 from .keyboards import (AdminCb, BackCb, ConfirmCb, DayCb, MyCancelCb, ServiceCb, SlotCb,
                         admin_kb, confirm_kb, contact_kb, days_kb, main_kb, my_kb,
                         services_kb, slots_kb)
-from .slots import bookable_days, day_grid, overlaps
+from .slots import day_grid, overlaps, week_grid
 from .texts import all_variants, fmt_day, fmt_when, status_text, step, t
 
 router = Router()
@@ -114,12 +114,12 @@ async def show_days(call: CallbackQuery, sid: str, db: DB, s: Settings):
     lang = user_lang(db, call.from_user)
     svc = s.services[sid]
     now = s.now()
-    days = bookable_days(svc.duration, busy_window(db, s, now), s.schedule, now)
-    if not days:
+    week = week_grid(svc.duration, busy_window(db, s, now), s.schedule, now)
+    if not any(free for _, free in week):
         await call.message.edit_text(t(lang, "no_days"), reply_markup=services_kb(lang, s))
         return
     await call.message.edit_text(step(lang, 2, "title_day") + "\n" + t(lang, "choose_day", service=svc.name(lang)),
-                                 reply_markup=days_kb(lang, sid, days, now.date()))
+                                 reply_markup=days_kb(lang, sid, week, now.date()))
 
 
 async def show_times(call: CallbackQuery, svc: Service, day, db: DB, s: Settings) -> bool:

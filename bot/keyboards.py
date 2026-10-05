@@ -70,12 +70,16 @@ def services_kb(lang: str, s: Settings):
     return kb.as_markup()
 
 
-def days_kb(lang: str, sid: str, days: list[date], today: date):
+def days_kb(lang: str, sid: str, week: list[tuple[date, bool]], today: date):
+    """The whole booking window: days off and fully booked days are greyed out."""
     kb = InlineKeyboardBuilder()
-    for d in days:
-        kb.button(text=day_label(lang, d, today), callback_data=DayCb(sid=sid, d=f"{d:%Y%m%d}"))
+    for d, free in week:
+        if free:
+            kb.button(text=day_label(lang, d, today), callback_data=DayCb(sid=sid, d=f"{d:%Y%m%d}"))
+        else:
+            kb.button(text=day_label(lang, d, today), disabled=DisabledButton())
     kb.button(text=t(lang, "back"), callback_data=BackCb(to="services"))
-    kb.adjust(*([3] * ((len(days) + 2) // 3)), 1)
+    kb.adjust(*([3] * ((len(week) + 2) // 3)), 1)
     return kb.as_markup()
 
 
