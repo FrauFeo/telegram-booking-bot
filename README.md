@@ -1,5 +1,7 @@
 # Booking bot for Telegram
 
+![Booking bot](deploy/cover-booking-bot.png)
+
 A Telegram bot that takes appointments for a small service business: a barbershop, a nail master, a tutor. Clients pick a service, a day and a free time, and leave a phone number. The owner gets the request with Confirm and Cancel buttons, and the bot reminds the client a day and two hours before the visit.
 
 Written in Python with aiogram 3 and SQLite. Interface in Ukrainian and English.
