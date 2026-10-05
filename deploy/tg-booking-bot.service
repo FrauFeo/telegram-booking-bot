@@ -1,0 +1,24 @@
+[Unit]
+Description=Telegram booking bot (demo)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bookingbot
+Group=bookingbot
+WorkingDirectory=/opt/tg-booking-bot
+ExecStart=/opt/tg-booking-bot/.venv/bin/python -m bot
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+# The bot only needs its own folder; keep the rest of the server out of reach.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tg-booking-bot
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

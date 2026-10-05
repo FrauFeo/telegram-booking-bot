@@ -4,6 +4,8 @@ A Telegram bot that takes appointments for a small service business: a barbersho
 
 Written in Python with aiogram 3 and SQLite. Interface in Ukrainian and English.
 
+**Try it:** [@SoexDemo_Bot](https://t.me/SoexDemo_Bot) runs in demo mode, so you see both the client side and the owner side.
+
 ## What the client sees
 
 1. 📅 Book → a list of services with duration and price.
@@ -77,3 +79,18 @@ Run the tests with `python -m pytest`.
 ## License
 
 MIT
+
+## Running on a server
+
+`deploy/tg-booking-bot.service` is a systemd unit: the bot runs as its own system user, can write only to its folder and restarts after a crash or a reboot.
+
+```bash
+sudo useradd --system --home-dir /opt/tg-booking-bot --shell /usr/sbin/nologin bookingbot
+sudo git clone https://github.com/FrauFeo/telegram-booking-bot.git /opt/tg-booking-bot
+sudo python3 -m venv /opt/tg-booking-bot/.venv
+sudo /opt/tg-booking-bot/.venv/bin/pip install -r /opt/tg-booking-bot/requirements.txt
+sudo install -o bookingbot -g bookingbot -m 600 .env /opt/tg-booking-bot/.env
+sudo chown -R bookingbot:bookingbot /opt/tg-booking-bot
+sudo cp /opt/tg-booking-bot/deploy/tg-booking-bot.service /etc/systemd/system/
+sudo systemctl enable --now tg-booking-bot
+```
