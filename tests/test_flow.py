@@ -145,7 +145,6 @@ async def test_booked_slot_disappears(env):
     grid = {b.text.replace(STRIKE, ""): b for b in shown}
     # taken times are crossed out too: older Telegram apps do not grey out disabled buttons
     assert all(STRIKE in b.text for b in shown if b.disabled)
-    assert "̶" in [b for b in buttons(session.sent(EditMessageText)[-1]) if b.disabled][0].text   # crossed out
     assert grid["10:00"].disabled is not None and grid["10:30"].disabled is not None   # shown, but greyed out
     assert grid["11:00"].callback_data and grid["11:00"].disabled is None
     # Telegram accepts exactly one action per button: a disabled one must not carry callback data
