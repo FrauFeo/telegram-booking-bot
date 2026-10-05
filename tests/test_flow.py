@@ -19,6 +19,7 @@ from bot.reminders import send_due
 from bot.slots import Schedule
 
 CLIENT, OWNER = 111, 999
+STRIKE = chr(0x0336)   # combining strikethrough used for taken days and times
 NOW = datetime(2026, 10, 5, 9, 0)   # Monday morning
 
 
@@ -140,7 +141,10 @@ async def test_booked_slot_disappears(env):
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
-    grid = {b.text.replace("̶", ""): b for b in buttons(session.sent(EditMessageText)[-1])}
+    shown = buttons(session.sent(EditMessageText)[-1])
+    grid = {b.text.replace(STRIKE, ""): b for b in shown}
+    # taken times are crossed out too: older Telegram apps do not grey out disabled buttons
+    assert all(STRIKE in b.text for b in shown if b.disabled)
     assert "̶" in [b for b in buttons(session.sent(EditMessageText)[-1]) if b.disabled][0].text   # crossed out
     assert grid["10:00"].disabled is not None and grid["10:30"].disabled is not None   # shown, but greyed out
     assert grid["11:00"].callback_data and grid["11:00"].disabled is None
@@ -221,6 +225,7 @@ async def test_week_shows_days_off_greyed(env):
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     days = [b for b in buttons(session.sent(EditMessageText)[-1]) if b.text != "Назад"]
     assert len(days) == 8                                   # today + 7 days, nothing hidden
-    sunday = next(b for b in days if b.text.replace("̶", "").startswith("Нд"))
+    sunday = next(b for b in days if b.text.replace(STRIKE, "").startswith("Нд"))
+    assert STRIKE in sunday.text
     assert sunday.disabled is not None and not sunday.callback_data
     assert days[0].text == "Сьогодні" and days[0].callback_data

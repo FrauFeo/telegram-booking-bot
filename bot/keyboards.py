@@ -48,7 +48,7 @@ def strike(text: str) -> str:
     Disabled buttons are greyed out only in up-to-date Telegram apps; older ones
     draw them like normal buttons. Crossing the label out shows "taken" everywhere.
     """
-    return "".join(ch + "̶" for ch in text)
+    return "".join(ch + chr(0x0336) for ch in text)
 
 
 # Button colours (Bot API 9.4+): "primary" blue, "success" green, "danger" red.
