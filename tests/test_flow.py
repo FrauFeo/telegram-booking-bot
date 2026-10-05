@@ -140,7 +140,8 @@ async def test_booked_slot_disappears(env):
     await send_text(dp, bot, CLIENT, "📅 Записатися")
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     await press(dp, bot, CLIENT, buttons(session.sent(EditMessageText)[-1])[0].callback_data)
-    grid = {b.text: b for b in buttons(session.sent(EditMessageText)[-1])}
+    grid = {b.text.replace("̶", ""): b for b in buttons(session.sent(EditMessageText)[-1])}
+    assert "̶" in [b for b in buttons(session.sent(EditMessageText)[-1]) if b.disabled][0].text   # crossed out
     assert grid["10:00"].disabled is not None and grid["10:30"].disabled is not None   # shown, but greyed out
     assert grid["11:00"].callback_data and grid["11:00"].disabled is None
     # Telegram accepts exactly one action per button: a disabled one must not carry callback data
@@ -220,6 +221,6 @@ async def test_week_shows_days_off_greyed(env):
     await press(dp, bot, CLIENT, buttons(session.sent()[-1])[0].callback_data)
     days = [b for b in buttons(session.sent(EditMessageText)[-1]) if b.text != "Назад"]
     assert len(days) == 8                                   # today + 7 days, nothing hidden
-    sunday = next(b for b in days if b.text.startswith("Нд"))
+    sunday = next(b for b in days if b.text.replace("̶", "").startswith("Нд"))
     assert sunday.disabled is not None and not sunday.callback_data
     assert days[0].text == "Сьогодні" and days[0].callback_data

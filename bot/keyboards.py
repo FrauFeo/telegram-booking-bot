@@ -42,6 +42,15 @@ class MyCancelCb(CallbackData, prefix="myc"):
     bid: int
 
 
+def strike(text: str) -> str:
+    """Strikethrough with a combining character (U+0336).
+
+    Disabled buttons are greyed out only in up-to-date Telegram apps; older ones
+    draw them like normal buttons. Crossing the label out shows "taken" everywhere.
+    """
+    return "".join(ch + "̶" for ch in text)
+
+
 # Button colours (Bot API 9.4+): "primary" blue, "success" green, "danger" red.
 # They carry the meaning that emoji used to, without cluttering the text.
 
@@ -77,7 +86,7 @@ def days_kb(lang: str, sid: str, week: list[tuple[date, bool]], today: date):
         if free:
             kb.button(text=day_label(lang, d, today), callback_data=DayCb(sid=sid, d=f"{d:%Y%m%d}"))
         else:
-            kb.button(text=day_label(lang, d, today), disabled=DisabledButton())
+            kb.button(text=strike(day_label(lang, d, today)), disabled=DisabledButton())
     kb.button(text=t(lang, "back"), callback_data=BackCb(to="services"))
     kb.adjust(*([3] * ((len(week) + 2) // 3)), 1)
     return kb.as_markup()
@@ -90,7 +99,7 @@ def slots_kb(lang: str, sid: str, grid: list[tuple[datetime, bool]]):
         if free:
             kb.button(text=f"{start:%H:%M}", callback_data=SlotCb(sid=sid, ts=f"{start:%Y%m%d%H%M}"))
         else:
-            kb.button(text=f"{start:%H:%M}", disabled=DisabledButton())
+            kb.button(text=strike(f"{start:%H:%M}"), disabled=DisabledButton())
     kb.button(text=t(lang, "back"), callback_data=BackCb(to="days", sid=sid))
     kb.adjust(*([4] * ((len(grid) + 3) // 4)), 1)
     return kb.as_markup()
